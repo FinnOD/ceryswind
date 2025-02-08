@@ -1,0 +1,3 @@
+Simulates the wind on Cerys 
+
+`cargo run --release`

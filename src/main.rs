@@ -14,9 +14,11 @@ use rayon::prelude::*;
 //Simulation settings
 const NUM_RODS: usize = 20;
 const NUM_BOXES: usize = 5;
-const MAX_BOXES: usize = 10;
-const MAX_RODS: usize = GRID_SIZE*GRID_SIZE / (4*4);
+const MAX_BOXES: usize = 12; //you can only have so many
+const MAX_RODS: usize = GRID_SIZE*GRID_SIZE / (2*2);
 const GRID_SIZE: usize = 30; //2 * (MOON_RADIUS as usize);
+const NUM_GENERATIONS: u32 = 1000;
+const POPULATION_SIZE: u64 = 100;
 
 //Graphics settings
 const PARTICLE_RADIUS: usize = SCALE / 8;
@@ -175,7 +177,7 @@ fn spawn_solar_wind_particle(particles: &mut Vec<Particle>) {
         //x: -(WIND_SPAWN_DISTANCE - rng.random_range(0.0..10.0)),
         x: -WIND_SPAWN_DISTANCE * rng.random::<f64>(),
         // y: rng.random_range(0.0..= (2.0 * (MOON_RADIUS + 8.0))),
-        y: rng.random_range(0.0..=GRID_SIZE as f64),
+        y: rng.random_range(-(GRID_SIZE as f64)-WIND_SPAWN_DISTANCE..=(GRID_SIZE as f64)+WIND_SPAWN_DISTANCE ),
         vx: SOLAR_WIND_MIN_VELOCITY + rng.random_range(0.0..1.0) * 0.05,
         vy: 0.3 * (rng.random::<f64>() - 0.5).powi(3),
         age: 0,
@@ -486,13 +488,18 @@ impl Individual {
         }
     }
 
+    fn hits_per_particle_per_box(&self) -> f64 {
+        self.boxes.iter().map(|b| b.count).sum::<u32>() as f64 / (self.boxes.len() as f64 * self.total_particles as f64)
+    }
+
+
     fn fitness(&self) -> f64 {
         let boxes_adjustment =  1.0 - (self.boxes.len() as f64 / MAX_BOXES as f64);
         let rods_adjustment = 1.0 - (self.rods.len() as f64 / MAX_RODS as f64);
-        let effiency = (rods_adjustment * boxes_adjustment).powf(1.0/1.5);
+        let effiency = rods_adjustment * boxes_adjustment;
+        // println!("Boxes {} Rods {} Effiency: {}", self.boxes.len(), self.rods.len(), effiency);
 
-        let total_count = self.boxes.iter().map(|b| b.count).sum::<u32>() as f64;
-        effiency * total_count / (self.boxes.len() as f64 * self.total_particles as f64)
+        self.hits_per_particle_per_box()
     }
 
     fn reset_sim(&mut self) {
@@ -507,13 +514,13 @@ impl Individual {
     fn random_mutate(&mut self, alpha: f64) {
         let mut rng = rand::rng();
 
-        if (alpha < rng.random::<f64>()){
-            self.max_rods = (self.max_rods as f64 + (5.0 * (rng.random::<f64>() - 0.5)))
+        if alpha < rng.random::<f64>(){
+            self.max_rods = (self.max_rods as f64 + (4.0 * (rng.random::<f64>() - 0.5)))
                 .round() as usize;
             self.max_rods = self.max_rods.clamp(1, MAX_RODS);
         }
-        if (alpha < rng.random::<f64>()){
-            self.max_boxes = (self.max_boxes as f64 + (5.0 * (rng.random::<f64>() - 0.5)))
+        if alpha < rng.random::<f64>(){
+            self.max_boxes = (self.max_boxes as f64 + (4.0 * (rng.random::<f64>() - 0.5)))
                 .round() as usize;
             self.max_boxes = self.max_boxes.clamp(1, MAX_BOXES);
         }
@@ -602,16 +609,15 @@ impl Individual {
 fn main() {
     let mut rng = rand::rng();
 
-    let pop_size: u64 = 100;
-    let mut population: Vec<Individual> = (0..pop_size)
+    let mut population: Vec<Individual> = (0..POPULATION_SIZE)
         .into_par_iter()
         .map(|_| Individual::new(GRID_SIZE, NUM_RODS, NUM_BOXES))
         .collect::<Vec<Individual>>();
 
-    for gen_num in 1..=50000 {
+    for gen_num in 1..=NUM_GENERATIONS {
         population
             .par_iter_mut()
-            .progress_count(pop_size)
+            .progress_count(POPULATION_SIZE)
             .for_each(|indiv| {
                 let mut tick = 0;
 
@@ -633,6 +639,7 @@ fn main() {
         let percentiles = [0.01, 0.20, 0.50];
 
         let fitness_values: Vec<f64> = population.iter().map(|indiv| indiv.fitness()).collect();
+        let hits_values: Vec<f64>= population.iter().map(|indiv| indiv.hits_per_particle_per_box()).collect();
         let box_counts: Vec<usize> = population.iter().map(|indiv| indiv.boxes.len()).collect();
         let rod_counts: Vec<usize> = population.iter().map(|indiv| indiv.rods.len()).collect();
 
@@ -646,12 +653,13 @@ fn main() {
             counts[index]
         };
         println!("Generation: {}", gen_num);
-        println!("{:<15} {:<15} {:<15} {:<15}", "Percentile", "Fitness", format!("Boxes\\{}", MAX_BOXES),format!("Rods\\{}", MAX_RODS));
+        println!("{:<15} {:<35} {:<15} {:<15} {:<15}", "Percentile", "Hits per Particle per Box", "Fitness", format!("Boxes\\{}", MAX_BOXES), format!("Rods\\{}", MAX_RODS));
         for &percentile in &percentiles {
             println!(
-            "{:<15.0} {:<15.5} {:<15} {:<15}",
+            "{:<15.0} {:<35.5} {:<15.5} {:<15} {:<15}",
             percentile * 100.0,
             get_percentile_value(&fitness_values, percentile),
+            get_percentile_value(&hits_values, percentile),
             get_percentile_count(&box_counts, percentile),
             get_percentile_count(&rod_counts, percentile)
             );
@@ -699,7 +707,7 @@ fn main() {
             .iter()
             .filter(|indiv| {
                 let rank = ranks.iter().find(|&&(id, _)| id == indiv.id).unwrap().1;
-                let survival_chance = 1.0 - (rank as f64 / pop_size as f64);
+                let survival_chance = 1.0 - (rank as f64 / POPULATION_SIZE as f64);
                 rng.random::<f64>() <= survival_chance
             })
             .cloned()
@@ -707,7 +715,7 @@ fn main() {
 
         for indiv in population.iter_mut() {
             let rank = ranks.iter().find(|&&(id, _)| id == indiv.id).unwrap().1;
-            let survival_chance = 1.0 - (rank as f64 / pop_size as f64);
+            let survival_chance = 1.0 - (rank as f64 / POPULATION_SIZE as f64);
 
             
             if rng.random::<f64>() > 0.2 {
