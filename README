@@ -4,4 +4,4 @@ Simulates the wind on Cerys
 cargo run --release
 ```
 
-![screenshot](https://raw.githubusercontent.com/FinnOD/ceryswind/refs/heads/master/Screenshot.png?raw=true)
+![screenshot of simulation](https://github.com/FinnOD/ceryswind/blob/master/Screenshot.png)
