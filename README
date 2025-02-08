@@ -1,3 +1,7 @@
 Simulates the wind on Cerys 
 
-`cargo run --release`
+```
+cargo run --release
+```
+
+![screenshot](https://raw.githubusercontent.com/FinnOD/ceryswind/refs/heads/master/Screenshot.png?raw=true)
